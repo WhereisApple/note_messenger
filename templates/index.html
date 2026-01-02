@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Note Messenger</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+    <div class="container">
+
+        <!-- Create Note Section -->
+        <section class="card">
+            <h2>Create Note</h2>
+            <textarea id="noteText" placeholder="Type your note"></textarea>
+            <button onclick="createNote()">Generate OTP</button>
+            <p id="otpResult"></p>
+        </section>
+
+        <!-- Retrieve Note Section -->
+        <section class="card">
+            <h2>Retrieve Note</h2>
+            <input type="text" id="otpInput" placeholder="Enter OTP">
+            <button onclick="getNote()">Get Note</button>
+            <p id="noteOutput"></p>
+        </section>
+
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    <footer>725</footer>
+</body>
+
+</html>
