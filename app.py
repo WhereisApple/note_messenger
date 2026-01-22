@@ -3,7 +3,7 @@ import random
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
-import psycopg2
+import pgcrypto
 from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
