@@ -1,34 +1,23 @@
 import os
-import random
+import secrets
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
-import pgcrypto
-from cryptography.fernet import Fernet
 from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
-fernet = Fernet(os.environ["FERNET_KEY"].encode())
+DATABASE_URL = os.environ["DATABASE_URL"]
+ENCRYPTION_KEY = os.environ["ENCRYPTION_KEY"]
 
-def get_db():
-    return psycopg2.connect(
-        os.environ["DATABASE_URL"],
-        sslmode="require"
-    )
-
+engine = create_engine(DATABASE_URL)
 
 def generate_otp():
-    return str(random.randint(100000, 999999))
-
-def encrypt(text):
-    return fernet.encrypt(text.encode()).decode()
-
-def decrypt(token):
-    return fernet.decrypt(token.encode()).decode()
+    return str(secrets.randbelow(900000) + 100000)
 
 @app.route("/")
 def home():
@@ -36,55 +25,42 @@ def home():
 
 @app.route("/api/notes", methods=["POST"])
 def create_note():
-    text = request.json.get("text")
-    if not text:
+    text_value = request.json.get("text")
+    if not text_value:
         return jsonify({"error": "Text required"}), 400
 
     otp = generate_otp()
-    encrypted = encrypt(text)
     expires = datetime.utcnow() + timedelta(minutes=5)
 
-    db = get_db()
-    cur = db.cursor()
-    cur.execute("""
-        INSERT INTO notes (otp, encrypted_text, expires_at)
-        VALUES (%s, %s, %s)
-    """, (otp, encrypted, expires))
-    db.commit()
-    cur.close()
-    db.close()
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO notes (otp, encrypted_text, expires_at)
+            VALUES (:otp, pgp_sym_encrypt(:text_value, :key), :expires)
+        """), {"otp": otp, "text_value": text_value, "key": ENCRYPTION_KEY, "expires": expires})
 
     return jsonify({"otp": otp, "expires_in": "5 minutes"}), 201
 
 @app.route("/api/notes/retrieve", methods=["POST"])
 def retrieve_note():
     otp = request.json.get("otp")
-    db = get_db()
-    cur = db.cursor()
-    cur.execute("""
-        SELECT id, encrypted_text, expires_at
-        FROM notes WHERE otp = %s
-    """, (otp,))
-    row = cur.fetchone()
 
-    if not row:
-        return jsonify({"error": "Invalid OTP"}), 404
+    with engine.begin() as conn:
+        row = conn.execute(text("""
+            SELECT id, pgp_sym_decrypt(encrypted_text, :key) AS decrypted_text, expires_at
+            FROM notes WHERE otp = :otp
+        """), {"otp": otp, "key": ENCRYPTION_KEY}).fetchone()
 
-    if datetime.utcnow() > row[2]:
-        cur.execute("DELETE FROM notes WHERE id = %s", (row[0],))
-        db.commit()
-        return jsonify({"error": "OTP expired"}), 410
+        if not row:
+            return jsonify({"error": "Invalid OTP"}), 404
 
-    text = decrypt(row[1])
+        if datetime.utcnow() > row.expires_at:
+            conn.execute(text("DELETE FROM notes WHERE id = :id"), {"id": row.id})
+            return jsonify({"error": "OTP expired"}), 410
+            
+        conn.execute(text("DELETE FROM notes WHERE id = :id"), {"id": row.id})
 
-    # One-time delete
-    cur.execute("DELETE FROM notes WHERE id = %s", (row[0],))
-    db.commit()
-    cur.close()
-    db.close()
-
-    return jsonify({"text": text}), 200
+    return jsonify({"text": row.decrypted_text}), 200
 
 if __name__ == "__main__":
-    port=int(os.environ.get("PORT", 8000))
+    port = int(os.environ.get("PORT", 8000))
     app.run(host="0.0.0.0", port=port)
